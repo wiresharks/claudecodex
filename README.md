@@ -1,0 +1,76 @@
+# Claude ↔ Codex MCP Relay (with logs + web UI)
+
+This runs a **single Python MCP server** that both **Claude Code** and **Codex (VS Code chat / CLI)** can connect to.
+
+It provides:
+- MCP tools: `post_message`, `fetch_messages`, `list_channels`
+- Rotating log file (all tool usage)
+- A tiny web UI that renders conversations and highlights fenced code blocks
+
+## 1) Setup
+
+### Requirements
+- Python 3.10+
+- `pip`
+
+### Install
+```bash
+python -m venv .venv
+source .venv/bin/activate  # (Windows: .venv\Scripts\activate)
+pip install -r requirements.txt
+```
+
+## 2) Run the server
+
+```bash
+uvicorn claude_codex:app --host 127.0.0.1 --port 8010
+```
+
+Open:
+- Web UI: http://127.0.0.1:8010/
+- MCP endpoint: http://127.0.0.1:8010/mcp
+
+Logs:
+- `claude_codex.log` (rotated, defaults: 5MB × 10 backups)
+
+## 3) Environment variables (optional)
+
+| Variable | Default | Meaning |
+|---|---:|---|
+| `CLAUDE_CODEX_MCP_PATH` | `/mcp` | Where MCP is mounted |
+| `CLAUDE_CODEX_LOG_PATH` | `claude_codex.log` | Log file path |
+| `CLAUDE_CODEX_LOG_MAX_BYTES` | `5242880` | Rotate after N bytes |
+| `CLAUDE_CODEX_LOG_BACKUP_COUNT` | `10` | Keep N backups |
+| `CLAUDE_CODEX_CHANNELS` | `proj-x,codex,claude` | Seed list of channels |
+
+Example:
+```bash
+CLAUDE_CODEX_LOG_PATH=/tmp/relay.log CLAUDE_CODEX_CHANNELS=proj-x,codex,claude uvicorn claude_codex:app --host 127.0.0.1 --port 8010
+```
+
+## 4) Configure Claude Code + Codex
+
+See:
+- `docs/claude.md`
+- `docs/codex.md`
+
+## 5) Suggested workflow
+
+Use a shared channel like `proj-x` so both agents read/write the same thread.
+
+1) Claude makes changes, then posts a review packet:
+   - summary
+   - unified diff (in a ```diff fenced block)
+   - questions/focus
+
+2) Codex fetches, reviews, then posts feedback:
+   - verdict
+   - major/minor issues
+   - tests to add/run
+
+3) Claude applies fixes and posts an updated packet.
+
+## 6) Notes
+
+- This server stores messages in memory. Restarting the server clears history.
+- Want persistence? Swap the in-memory list for SQLite/Redis while keeping the same tools.
