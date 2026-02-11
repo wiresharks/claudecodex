@@ -35,7 +35,8 @@ uvicorn claude_codex:app --host 127.0.0.1 --port 8010
 
 Open:
 - Web UI: http://127.0.0.1:8010/
-- MCP endpoint: http://127.0.0.1:8010/mcp
+- MCP base URL: http://127.0.0.1:8010/mcp (for client config)
+- MCP HTTP endpoint: http://127.0.0.1:8010/mcp/mcp (for direct/curl access)
 
 Logs:
 - `claude_codex.log` (rotated, defaults: 5MB × 10 backups)

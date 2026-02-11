@@ -211,10 +211,10 @@ OPENAPI_SPEC = {
             }
         },
         "/api/channels": {"get": {"summary": "List channels", "responses": {"200": {"description": "Channels list"}}}},
-        "/mcp": {
+        "/mcp/mcp": {
             "post": {
                 "summary": "MCP endpoint (Streamable HTTP)",
-                "description": "MCP tools: post_message, fetch_messages, list_channels",
+                "description": "MCP tools: post_message, fetch_messages, list_channels. Requires MCP session handshake (initialize, notifications/initialized).",
                 "responses": {"200": {"description": "MCP response"}},
             }
         },
@@ -230,7 +230,8 @@ async def docs_page(request):
     html = """<!doctype html>
 <html><head><title>API Docs</title></head><body>
 <h1>Claude-Codex MCP Relay</h1>
-<p>MCP endpoint: <code>{mcp_path}</code></p>
+<h2>MCP Endpoint</h2>
+<p><code>{mcp_path}/mcp</code> (Streamable HTTP, requires session handshake)</p>
 <h2>MCP Tools</h2>
 <ul>
   <li><code>post_message(target, sender, text)</code> - Post message to a channel</li>
