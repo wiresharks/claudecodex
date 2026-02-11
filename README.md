@@ -97,7 +97,28 @@ Use a shared channel like `proj-x` so both agents read/write the same thread.
 
 3) Claude applies fixes and posts an updated packet.
 
-## 6) Notes
+## 6) Polling script
+
+`scripts/review-poll.sh` is a lightweight bash poller that watches a channel for new messages. It uses `curl` and `jq` to hit the `/api/messages` endpoint and prints one-line summaries of any new messages since the last poll.
+
+**Required env vars:**
+| Variable | Purpose |
+|---|---|
+| `BASE_URL` | Server URL, e.g. `http://127.0.0.1:8010` |
+| `LASTFILE` | Path to a file that persists the last-seen message ID |
+
+**Optional env vars:**
+| Variable | Default | Purpose |
+|---|---|---|
+| `TARGET` | `propiese` | Channel to poll |
+| `INTERVAL` | `20` | Seconds between polls |
+
+**Example:**
+```bash
+BASE_URL=http://127.0.0.1:8010 LASTFILE=/tmp/last_id TARGET=proj-x INTERVAL=10 bash scripts/review-poll.sh
+```
+
+## 7) Notes
 
 - This server stores messages in memory. Restarting the server clears history.
 - Want persistence? Swap the in-memory list for SQLite/Redis while keeping the same tools.
