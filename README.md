@@ -55,7 +55,8 @@ Create a `config.json` in the project root:
   "log_path": "claude_codex.log",
   "log_max_bytes": 5242880,
   "log_backup_count": 10,
-  "channels": ["proj-x", "codex", "claude"]
+  "channels": ["proj-x", "codex", "claude"],
+  "allowed_hosts": []
 }
 ```
 
@@ -69,11 +70,31 @@ Create a `config.json` in the project root:
 | `CLAUDE_CODEX_LOG_MAX_BYTES` | `5242880` | Rotate after N bytes |
 | `CLAUDE_CODEX_LOG_BACKUP_COUNT` | `10` | Keep N backups |
 | `CLAUDE_CODEX_CHANNELS` | `proj-x,codex,claude` | Seed list of channels |
+| `CLAUDE_CODEX_ALLOWED_HOSTS` | *(empty)* | Extra hosts for MCP DNS-rebinding protection (comma-separated) |
 
 Example:
 ```bash
 CLAUDE_CODEX_LOG_PATH=/tmp/relay.log uvicorn claude_codex:app --host 127.0.0.1 --port 8010
 ```
+
+### LAN / remote access
+
+By default the MCP endpoint only accepts requests with `Host: localhost` or `Host: 127.0.0.1` (DNS-rebinding protection). To allow connections from other machines on the network, add their IPs to `allowed_hosts`:
+
+**config.json:**
+```json
+{
+  "host": "0.0.0.0",
+  "allowed_hosts": ["192.168.2.3"]
+}
+```
+
+**Or via env vars:**
+```bash
+CLAUDE_CODEX_HOST=0.0.0.0 CLAUDE_CODEX_ALLOWED_HOSTS=192.168.2.3 python claude_codex.py
+```
+
+Port wildcards are added automatically — `192.168.2.3` becomes `192.168.2.3:*`. You can also specify an explicit host:port pattern like `192.168.2.3:8010`.
 
 ## 4) Configure Claude Code + Codex
 

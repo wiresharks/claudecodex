@@ -15,6 +15,7 @@ from starlette.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 # -----------------------------------------------------------------------------
 # Config
@@ -47,6 +48,12 @@ LOG_BACKUP_COUNT = int(_get_config("log_backup_count", 10))
 
 _channels_raw = _get_config("channels", "proj-x,codex,claude")
 DEFAULT_CHANNELS = _channels_raw if isinstance(_channels_raw, list) else _channels_raw.split(",")
+
+_allowed_hosts_raw = _get_config("allowed_hosts", "")
+_ALLOWED_HOSTS: list[str] = (
+    _allowed_hosts_raw if isinstance(_allowed_hosts_raw, list)
+    else [h.strip() for h in _allowed_hosts_raw.split(",") if h.strip()]
+) if _allowed_hosts_raw else []
 
 # -----------------------------------------------------------------------------
 # Logging (rotating)
@@ -88,7 +95,13 @@ def _append_message(target: str, sender: str, text: str) -> dict[str, Any]:
 # -----------------------------------------------------------------------------
 # MCP server (Streamable HTTP)
 # -----------------------------------------------------------------------------
-mcp = FastMCP("claude-codex-relay", json_response=True)
+_default_hosts = ["127.0.0.1:*", "localhost:*", "[::1]:*"]
+_transport_security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=_default_hosts + [h if ":" in h else f"{h}:*" for h in _ALLOWED_HOSTS],
+)
+
+mcp = FastMCP("claude-codex-relay", json_response=True, transport_security=_transport_security)
 
 
 @mcp.tool()
