@@ -7,6 +7,7 @@ import logging
 import os
 import time
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 from typing import Any
 
 from starlette.applications import Starlette
@@ -127,139 +128,20 @@ async def list_channels() -> dict[str, Any]:
 # -----------------------------------------------------------------------------
 # Web UI
 # -----------------------------------------------------------------------------
-HTML_PAGE = """<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>MCP Relay Conversation</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
-    header { display:flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
-    h1 { font-size: 18px; margin: 0; }
-    .muted { color: #666; font-size: 13px; }
-    .row { display:flex; gap: 10px; align-items:center; margin: 14px 0; flex-wrap: wrap; }
-    input, select { padding: 6px 8px; font-size: 14px; }
-    button { padding: 6px 10px; font-size: 14px; cursor: pointer; }
-    .msg { border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; margin: 10px 0; }
-    .meta { display:flex; gap: 10px; align-items:center; margin-bottom: 8px; color:#444; font-size: 12px; flex-wrap: wrap; }
-    .badge { padding: 2px 8px; border-radius: 999px; background: #f2f2f2; }
-    pre { overflow:auto; padding: 10px; border-radius: 8px; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-    .text { white-space: pre-wrap; }
-    .footer { margin-top: 20px; font-size: 12px; color: #666; }
-    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
-  </style>
-  <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css">
-</head>
-<body>
-  <header>
-    <h1>MCP Relay</h1>
-    <div class="muted">Live view of messages posted through MCP tools.</div>
-  </header>
+_BASE_DIR = Path(__file__).parent
+_index_html_cache: str | None = None
 
-  <div class="row">
-    <label>Channel:</label>
-    <select id="channel"></select>
-    <button id="reload">Reload</button>
-    <span class="muted">Use a shared channel like <span class="mono">proj-x</span> for one combined thread.</span>
-  </div>
 
-  <div id="list"></div>
+def _load_index_html() -> str:
+    global _index_html_cache
+    if _index_html_cache is None:
+        _index_html_cache = (_BASE_DIR / "index.html").read_text(encoding="utf-8")
+    return _index_html_cache
 
-  <div class="footer">
-    MCP endpoint: <span class="mono" id="mcpEndpoint"></span> •
-    API: <span class="mono">/api/messages</span>
-  </div>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script>
-    const listEl = document.getElementById("list");
-    const chanEl = document.getElementById("channel");
-    const reloadBtn = document.getElementById("reload");
-    const mcpEndpointEl = document.getElementById("mcpEndpoint");
-
-    function escapeHtml(s) {
-      return (s ?? "").toString()
-        .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
-        .replaceAll('"',"&quot;").replaceAll("'","&#039;");
-    }
-
-    // Supports fenced code blocks ```lang ... ```
-    function renderText(text) {
-      const t = text || "";
-      const parts = t.split(/```/g);
-      if (parts.length === 1) {
-        return `<div class="text">${escapeHtml(t)}</div>`;
-      }
-      let html = "";
-      for (let i = 0; i < parts.length; i++) {
-        const chunk = parts[i];
-        if (i % 2 === 0) {
-          if (chunk) html += `<div class="text">${escapeHtml(chunk)}</div>`;
-        } else {
-          const firstNewline = chunk.indexOf("\n");
-          let lang = "";
-          let code = chunk;
-          if (firstNewline !== -1) {
-            lang = chunk.slice(0, firstNewline).trim();
-            code = chunk.slice(firstNewline + 1);
-          }
-          const langClass = lang ? `language-${escapeHtml(lang)}` : "";
-          html += `<pre><code class="${langClass}">${escapeHtml(code)}</code></pre>`;
-        }
-      }
-      return html;
-    }
-
-    async function loadChannels() {
-      const res = await fetch(`/api/channels`);
-      const data = await res.json();
-      const chans = data.channels || ["proj-x","codex","claude"];
-      chanEl.innerHTML = chans.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
-      if (!chanEl.value) chanEl.value = chans[0] || "proj-x";
-    }
-
-    async function load() {
-      const target = chanEl.value || "proj-x";
-      const res = await fetch(`/api/messages?target=${encodeURIComponent(target)}&limit=200`);
-      const data = await res.json();
-
-      const items = data.messages || [];
-      listEl.innerHTML = items.map(m => {
-        const ts = new Date((m.ts || 0) * 1000).toLocaleString();
-        return `
-          <div class="msg">
-            <div class="meta">
-              <span class="badge">#${m.id}</span>
-              <span class="badge">to: ${escapeHtml(m.target)}</span>
-              <span class="badge">from: ${escapeHtml(m.sender)}</span>
-              <span class="muted">${escapeHtml(ts)}</span>
-            </div>
-            ${renderText(m.text)}
-          </div>
-        `;
-      }).join("");
-
-      document.querySelectorAll("pre code").forEach(el => hljs.highlightElement(el));
-      mcpEndpointEl.textContent = location.origin + "%(mcp_path)s";
-    }
-
-    reloadBtn.addEventListener("click", load);
-
-    (async () => {
-      await loadChannels();
-      await load();
-      setInterval(load, 1200);
-    })();
-  </script>
-</body>
-</html>
-"""
 
 async def homepage(request):
-    return HTMLResponse(HTML_PAGE % {"mcp_path": MCP_PATH})
+    html = _load_index_html().replace("{{MCP_PATH}}", MCP_PATH)
+    return HTMLResponse(html)
 
 
 async def api_messages(request):
