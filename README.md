@@ -112,6 +112,7 @@ Use a shared channel like `proj-x` so both agents read/write the same thread.
 |---|---|---|
 | `TARGET` | `propiese` | Channel to poll |
 | `INTERVAL` | `20` | Seconds between polls |
+| `WATCH_SENDER` | `claude` | Only show messages from this sender (ignores own messages) |
 
 **Example:**
 ```bash
@@ -200,6 +201,8 @@ This is the **only fully automated option**. It uses [Codex CLI](https://github.
 
 Create a script (e.g. `.codex/auto-review-loop.sh`):
 
+The script uses `codex exec` (non-interactive/headless mode) so that Codex **exits automatically** after completing each review. The regular `codex` and `codex resume` commands open an interactive session that would block the loop.
+
 ```bash
 #!/usr/bin/env bash
 set -u
@@ -208,6 +211,8 @@ BASE_URL="${BASE_URL:-http://127.0.0.1:8010}"
 TARGET="${TARGET:-proj-x}"
 INTERVAL="${INTERVAL:-20}"
 LASTFILE="${LASTFILE:-.codex/auto-loop.last_id}"
+SESSION_ID="${SESSION_ID:-}"       # optional: resume an existing Codex session
+WATCH_SENDER="${WATCH_SENDER:-claude}"  # only react to messages from this sender
 
 LAST=0
 if [ -f "$LASTFILE" ]; then
@@ -215,16 +220,25 @@ if [ -f "$LASTFILE" ]; then
 fi
 if ! [[ "$LAST" =~ ^[0-9]+$ ]]; then LAST=0; fi
 
-echo "auto-loop started: target=$TARGET interval=${INTERVAL}s last=$LAST"
+echo "auto-loop started: target=$TARGET sender=$WATCH_SENDER interval=${INTERVAL}s last=$LAST session=${SESSION_ID:-new}"
 
 while true; do
-  NEW=$(curl -sS -m 10 "$BASE_URL/api/messages?target=$TARGET&limit=1" \
-        | jq -r '.messages[-1].id // 0' 2>/dev/null || echo "$LAST")
+  JSON=$(curl -sS -m 10 "$BASE_URL/api/messages?target=$TARGET&limit=200" || true)
+
+  # Only look at messages from WATCH_SENDER — ignore own (codex) messages
+  NEW=$(printf "%s" "$JSON" | jq -r --argjson d "$LAST" --arg sender "$WATCH_SENDER" \
+    '[.messages[] | select(.sender == $sender)] | last | .id // $d' 2>/dev/null || echo "$LAST")
 
   if [[ "$NEW" =~ ^[0-9]+$ ]] && [ "$NEW" -gt "$LAST" ]; then
-    echo "$(date -Iseconds) new messages detected (last=$LAST, new=$NEW) — launching Codex"
-    codex --approval-mode auto \
-      "Fetch messages from the $TARGET channel (since id $LAST) and review any new ones. Post your feedback back to the same channel."
+    echo "$(date -Iseconds) new messages from $WATCH_SENDER (last=$LAST, new=$NEW) — launching Codex"
+    PROMPT="Fetch messages from the $TARGET channel (since id $LAST) sent by $WATCH_SENDER and review them. Post your feedback back to the same channel."
+    if [ -n "$SESSION_ID" ]; then
+      # Resume existing session — keeps full conversation context across reviews
+      codex exec --dangerously-bypass-approvals-and-sandbox resume "$SESSION_ID" "$PROMPT"
+    else
+      # Start a fresh session
+      codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT"
+    fi
     LAST="$NEW"
     echo "$LAST" > "$LASTFILE"
   fi
@@ -237,27 +251,125 @@ done
 
 ```bash
 chmod +x .codex/auto-review-loop.sh
+
+# Start a new session each time
 BASE_URL=http://127.0.0.1:8010 TARGET=proj-x INTERVAL=15 \
+  bash .codex/auto-review-loop.sh
+
+# Or resume an existing Codex session (keeps conversation context)
+BASE_URL=http://127.0.0.1:8010 TARGET=proj-x SESSION_ID=abc123 \
   bash .codex/auto-review-loop.sh
 ```
 
 #### How it works
 
 1. The script polls `/api/messages` every `INTERVAL` seconds
-2. When a new message appears, it spawns a Codex CLI session with `--approval-mode auto`
-3. Codex connects to the MCP relay, fetches the new messages, reviews them, and posts feedback
-4. The last-seen ID is persisted to disk so restarts pick up where they left off
-5. The loop continues waiting for the next message
+2. When a new message appears, it runs `codex exec` (non-interactive mode) which processes the task and **exits automatically**
+3. If `SESSION_ID` is set, it uses `codex exec resume <SESSION_ID>` to continue an existing session — Codex keeps the full conversation history and builds on previous reviews
+4. Codex connects to the MCP relay, fetches the new messages, reviews them, and posts feedback
+5. The last-seen ID is persisted to disk so restarts pick up where they left off
+6. The loop continues waiting for the next message
 
-#### Approval modes
+> **Why `codex exec` instead of `codex`?** The regular `codex` command opens an interactive terminal UI that waits for user input and never exits. `codex exec` is the headless/non-interactive mode designed for scripts and automation — it runs the task and exits when done.
 
-| Mode | Behavior |
+#### Codex CLI session management
+
+Each Codex CLI chat gets a **session ID** stored under `~/.codex/sessions/`. You can use these to maintain continuity across reviews.
+
+| Command | Purpose |
 |---|---|
-| `--approval-mode suggest` | Codex suggests changes, you approve (not automated) |
-| `--approval-mode auto` | Codex auto-applies edits, asks before shell commands |
-| `--approval-mode full-auto` | Codex runs everything without asking (use with caution) |
+| `/status` | Show current session ID (inside a running session) |
+| `codex resume` | Pick a session to resume from a list |
+| `codex resume <SESSION_ID>` | Resume a specific session by ID |
+| `codex fork` | Fork a session into a new thread |
+| `codex fork --last` | Fork the most recent session |
 
-> **Note:** For unattended operation use `auto` or `full-auto`. The `suggest` mode defeats the purpose since it requires human approval.
+You can also type `/resume` inside the CLI to get an interactive session picker.
+
+**Tip:** After the first Codex run, grab the session ID from `/status` or `~/.codex/sessions/` and pass it as `SESSION_ID` to the auto-loop. This way every review iteration builds on the same conversation thread, giving Codex full context of previous feedback.
+
+#### Approval and sandbox modes
+
+| Flag | Approvals | File writes | Network |
+|---|---|---|---|
+| *(default)* | Asks before commands/writes | Workspace only | Blocked |
+| `--full-auto` | None | Workspace only | Blocked |
+| `--full-auto` + network config | None | Workspace only | Allowed |
+| `--sandbox danger-full-access` | Asks before commands | Anywhere | Allowed |
+| `--dangerously-bypass-approvals-and-sandbox` | None | Anywhere | Allowed |
+
+> **Important:** `--full-auto` blocks network access by default. Since Codex needs to reach the MCP relay, the auto-loop script above will fail unless network access is enabled.
+
+#### Enabling network access
+
+**Option 1:** Enable network in config (recommended). Add to `.codex/config.toml`:
+
+```toml
+[sandbox_workspace_write]
+network_access = true
+```
+
+Then `--full-auto` works as-is.
+
+**Option 2:** Pass sandbox config inline:
+
+```bash
+codex exec --full-auto -c 'sandbox_workspace_write.network_access=true' "$PROMPT"
+```
+
+**Option 3:** Bypass the sandbox entirely (use with caution):
+
+```bash
+codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT"
+```
+
+#### Full-auto script with network access
+
+This variant uses `--dangerously-bypass-approvals-and-sandbox` to ensure Codex can reach the MCP relay without any restrictions:
+
+```bash
+#!/usr/bin/env bash
+set -u
+
+BASE_URL="${BASE_URL:-http://127.0.0.1:8010}"
+TARGET="${TARGET:-proj-x}"
+INTERVAL="${INTERVAL:-20}"
+LASTFILE="${LASTFILE:-.codex/auto-loop.last_id}"
+SESSION_ID="${SESSION_ID:-}"
+WATCH_SENDER="${WATCH_SENDER:-claude}"  # only react to messages from this sender
+
+LAST=0
+if [ -f "$LASTFILE" ]; then
+  LAST=$(cat "$LASTFILE" 2>/dev/null || echo 0)
+fi
+if ! [[ "$LAST" =~ ^[0-9]+$ ]]; then LAST=0; fi
+
+echo "auto-loop started: target=$TARGET sender=$WATCH_SENDER interval=${INTERVAL}s last=$LAST session=${SESSION_ID:-new}"
+
+while true; do
+  JSON=$(curl -sS -m 10 "$BASE_URL/api/messages?target=$TARGET&limit=200" || true)
+
+  # Only look at messages from WATCH_SENDER — ignore own (codex) messages
+  NEW=$(printf "%s" "$JSON" | jq -r --argjson d "$LAST" --arg sender "$WATCH_SENDER" \
+    '[.messages[] | select(.sender == $sender)] | last | .id // $d' 2>/dev/null || echo "$LAST")
+
+  if [[ "$NEW" =~ ^[0-9]+$ ]] && [ "$NEW" -gt "$LAST" ]; then
+    echo "$(date -Iseconds) new messages from $WATCH_SENDER (last=$LAST, new=$NEW) — launching Codex"
+    PROMPT="Fetch messages from the $TARGET channel (since id $LAST) sent by $WATCH_SENDER and review them. Post your feedback back to the same channel."
+    if [ -n "$SESSION_ID" ]; then
+      codex exec --dangerously-bypass-approvals-and-sandbox resume "$SESSION_ID" "$PROMPT"
+    else
+      codex exec --dangerously-bypass-approvals-and-sandbox "$PROMPT"
+    fi
+    LAST="$NEW"
+    echo "$LAST" > "$LASTFILE"
+  fi
+
+  sleep "$INTERVAL"
+done
+```
+
+> **Safer alternative:** If you prefer to keep the workspace sandbox, add `network_access = true` to your `.codex/config.toml` (see Option 1 above) and use `--full-auto` instead.
 
 ## 8) Notes
 
