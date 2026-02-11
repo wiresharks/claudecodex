@@ -187,11 +187,73 @@ async def healthz(request):
 
 
 # -----------------------------------------------------------------------------
+# OpenAPI / Discovery
+# -----------------------------------------------------------------------------
+OPENAPI_SPEC = {
+    "openapi": "3.1.0",
+    "info": {
+        "title": "Claude-Codex MCP Relay",
+        "version": "1.0.0",
+        "description": "MCP relay server for Claude Code and Codex communication",
+    },
+    "servers": [{"url": "/"}],
+    "paths": {
+        "/": {"get": {"summary": "Web UI", "responses": {"200": {"description": "HTML page"}}}},
+        "/healthz": {"get": {"summary": "Health check", "responses": {"200": {"description": "ok"}}}},
+        "/api/messages": {
+            "get": {
+                "summary": "Fetch messages for a channel",
+                "parameters": [
+                    {"name": "target", "in": "query", "schema": {"type": "string", "default": "proj-x"}},
+                    {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 200}},
+                ],
+                "responses": {"200": {"description": "Messages list"}},
+            }
+        },
+        "/api/channels": {"get": {"summary": "List channels", "responses": {"200": {"description": "Channels list"}}}},
+        "/mcp": {
+            "post": {
+                "summary": "MCP endpoint (Streamable HTTP)",
+                "description": "MCP tools: post_message, fetch_messages, list_channels",
+                "responses": {"200": {"description": "MCP response"}},
+            }
+        },
+    },
+}
+
+
+async def openapi_json(request):
+    return JSONResponse(OPENAPI_SPEC)
+
+
+async def docs_page(request):
+    html = """<!doctype html>
+<html><head><title>API Docs</title></head><body>
+<h1>Claude-Codex MCP Relay</h1>
+<p>MCP endpoint: <code>{mcp_path}</code></p>
+<h2>MCP Tools</h2>
+<ul>
+  <li><code>post_message(target, sender, text)</code> - Post message to a channel</li>
+  <li><code>fetch_messages(target, since_id?, limit?)</code> - Fetch messages from a channel</li>
+  <li><code>list_channels()</code> - List available channels</li>
+</ul>
+<h2>HTTP API</h2>
+<ul>
+  <li><code>GET /api/messages?target=...&limit=...</code></li>
+  <li><code>GET /api/channels</code></li>
+  <li><code>GET /healthz</code></li>
+</ul>
+<p><a href="/openapi.json">OpenAPI spec</a></p>
+</body></html>""".format(mcp_path=MCP_PATH)
+    return HTMLResponse(html)
+
+
+# -----------------------------------------------------------------------------
 # Starlette app with MCP mounted
 # -----------------------------------------------------------------------------
 
-# Paths to exclude from uvicorn access logs (polling endpoints)
-_QUIET_PATHS = {"/", "/api/messages", "/api/channels", "/healthz"}
+# Paths to exclude from uvicorn access logs (polling/discovery endpoints)
+_QUIET_PATHS = {"/", "/api/messages", "/api/channels", "/healthz", "/docs", "/openapi.json"}
 
 
 class QuietAccessLogMiddleware:
@@ -225,6 +287,8 @@ _app = Starlette(
     routes=[
         Route("/", homepage, methods=["GET"]),
         Route("/healthz", healthz, methods=["GET"]),
+        Route("/docs", docs_page, methods=["GET"]),
+        Route("/openapi.json", openapi_json, methods=["GET"]),
         Route("/api/messages", api_messages, methods=["GET"]),
         Route("/api/channels", api_channels, methods=["GET"]),
         Mount(MCP_PATH, app=mcp.streamable_http_app(), name="mcp"),
