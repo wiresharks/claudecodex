@@ -23,6 +23,13 @@ pip install -r requirements.txt
 ## 2) Run the server
 
 ```bash
+python claude_codex.py
+```
+
+This reads host/port from `config.json` (or env vars, or defaults to `127.0.0.1:8010`).
+
+Alternatively, specify host/port directly:
+```bash
 uvicorn claude_codex:app --host 127.0.0.1 --port 8010
 ```
 

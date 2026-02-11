@@ -233,3 +233,9 @@ _app = Starlette(
 )
 
 app = QuietAccessLogMiddleware(_app)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("claude_codex:app", host=HOST, port=PORT, reload=False)
