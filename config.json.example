@@ -1,0 +1,9 @@
+{
+  "host": "127.0.0.1",
+  "port": 8010,
+  "mcp_path": "/mcp",
+  "log_path": "claude_codex.log",
+  "log_max_bytes": 5242880,
+  "log_backup_count": 10,
+  "channels": ["proj-x", "codex", "claude"]
+}

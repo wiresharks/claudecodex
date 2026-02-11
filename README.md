@@ -33,10 +33,32 @@ Open:
 Logs:
 - `claude_codex.log` (rotated, defaults: 5MB × 10 backups)
 
-## 3) Environment variables (optional)
+## 3) Configuration
+
+Configuration is loaded from `config.json` (if present), then environment variables, then defaults.
+
+### Option A: config.json (recommended)
+
+Create a `config.json` in the project root:
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 8010,
+  "mcp_path": "/mcp",
+  "log_path": "claude_codex.log",
+  "log_max_bytes": 5242880,
+  "log_backup_count": 10,
+  "channels": ["proj-x", "codex", "claude"]
+}
+```
+
+### Option B: Environment variables
 
 | Variable | Default | Meaning |
 |---|---:|---|
+| `CLAUDE_CODEX_HOST` | `127.0.0.1` | Server host |
+| `CLAUDE_CODEX_PORT` | `8010` | Server port |
 | `CLAUDE_CODEX_MCP_PATH` | `/mcp` | Where MCP is mounted |
 | `CLAUDE_CODEX_LOG_PATH` | `claude_codex.log` | Log file path |
 | `CLAUDE_CODEX_LOG_MAX_BYTES` | `5242880` | Rotate after N bytes |
@@ -45,7 +67,7 @@ Logs:
 
 Example:
 ```bash
-CLAUDE_CODEX_LOG_PATH=/tmp/relay.log CLAUDE_CODEX_CHANNELS=proj-x,codex,claude uvicorn claude_codex:app --host 127.0.0.1 --port 8010
+CLAUDE_CODEX_LOG_PATH=/tmp/relay.log uvicorn claude_codex:app --host 127.0.0.1 --port 8010
 ```
 
 ## 4) Configure Claude Code + Codex

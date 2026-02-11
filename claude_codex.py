@@ -19,15 +19,35 @@ from mcp.server.fastmcp import FastMCP
 # -----------------------------------------------------------------------------
 # Config
 # -----------------------------------------------------------------------------
-HOST = os.environ.get("CLAUDE_CODEX_HOST", "127.0.0.1")
-PORT = int(os.environ.get("CLAUDE_CODEX_PORT", "8010"))
-MCP_PATH = os.environ.get("CLAUDE_CODEX_MCP_PATH", "/mcp")  # MCP endpoint base path
-LOG_PATH = os.environ.get("CLAUDE_CODEX_LOG_PATH", "claude_codex.log")
+_BASE_DIR = Path(__file__).parent
+_CONFIG_PATH = _BASE_DIR / "config.json"
 
-LOG_MAX_BYTES = int(os.environ.get("CLAUDE_CODEX_LOG_MAX_BYTES", str(5 * 1024 * 1024)))  # 5MB
-LOG_BACKUP_COUNT = int(os.environ.get("CLAUDE_CODEX_LOG_BACKUP_COUNT", "10"))
+# Load config.json if available
+_file_config: dict[str, Any] = {}
+if _CONFIG_PATH.exists():
+    try:
+        _file_config = json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        pass
 
-DEFAULT_CHANNELS = os.environ.get("CLAUDE_CODEX_CHANNELS", "proj-x,codex,claude").split(",")
+
+def _get_config(key: str, default: Any = None) -> Any:
+    """Get config value from config.json, then env var, then default."""
+    if key in _file_config:
+        return _file_config[key]
+    env_key = f"CLAUDE_CODEX_{key.upper()}"
+    return os.environ.get(env_key, default)
+
+
+HOST = _get_config("host", "127.0.0.1")
+PORT = int(_get_config("port", 8010))
+MCP_PATH = _get_config("mcp_path", "/mcp")
+LOG_PATH = _get_config("log_path", "claude_codex.log")
+LOG_MAX_BYTES = int(_get_config("log_max_bytes", 5 * 1024 * 1024))
+LOG_BACKUP_COUNT = int(_get_config("log_backup_count", 10))
+
+_channels_raw = _get_config("channels", "proj-x,codex,claude")
+DEFAULT_CHANNELS = _channels_raw if isinstance(_channels_raw, list) else _channels_raw.split(",")
 
 # -----------------------------------------------------------------------------
 # Logging (rotating)
@@ -128,7 +148,6 @@ async def list_channels() -> dict[str, Any]:
 # -----------------------------------------------------------------------------
 # Web UI
 # -----------------------------------------------------------------------------
-_BASE_DIR = Path(__file__).parent
 _index_html_cache: str | None = None
 
 
@@ -170,6 +189,31 @@ async def healthz(request):
 # -----------------------------------------------------------------------------
 # Starlette app with MCP mounted
 # -----------------------------------------------------------------------------
+
+# Paths to exclude from uvicorn access logs (polling endpoints)
+_QUIET_PATHS = {"/", "/api/messages", "/api/channels", "/healthz"}
+
+
+class QuietAccessLogMiddleware:
+    """Suppress uvicorn access logs for high-frequency polling endpoints."""
+
+    def __init__(self, app):
+        self.app = app
+        self._uvicorn_access = logging.getLogger("uvicorn.access")
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path") in _QUIET_PATHS:
+            # Temporarily disable uvicorn access logging
+            original_level = self._uvicorn_access.level
+            self._uvicorn_access.setLevel(logging.WARNING)
+            try:
+                await self.app(scope, receive, send)
+            finally:
+                self._uvicorn_access.setLevel(original_level)
+        else:
+            await self.app(scope, receive, send)
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: Starlette):
     # Required when mounting MCP into another ASGI app; ensures MCP background tasks run.
@@ -177,7 +221,7 @@ async def lifespan(app: Starlette):
         yield
 
 
-app = Starlette(
+_app = Starlette(
     routes=[
         Route("/", homepage, methods=["GET"]),
         Route("/healthz", healthz, methods=["GET"]),
@@ -187,3 +231,5 @@ app = Starlette(
     ],
     lifespan=lifespan,
 )
+
+app = QuietAccessLogMiddleware(_app)
