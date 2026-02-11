@@ -114,7 +114,7 @@
       }).join("");
 
       document.querySelectorAll("pre code").forEach(el => hljs.highlightElement(el));
-      mcpEndpointEl.textContent = location.origin + "{{MCP_PATH}}";
+      mcpEndpointEl.textContent = location.origin + "/mcp";
     }
 
     reloadBtn.addEventListener("click", load);

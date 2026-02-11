@@ -41,7 +41,6 @@ def _get_config(key: str, default: Any = None) -> Any:
 
 HOST = _get_config("host", "127.0.0.1")
 PORT = int(_get_config("port", 8010))
-MCP_PATH = _get_config("mcp_path", "/mcp")
 LOG_PATH = _get_config("log_path", "claude_codex.log")
 LOG_MAX_BYTES = int(_get_config("log_max_bytes", 5 * 1024 * 1024))
 LOG_BACKUP_COUNT = int(_get_config("log_backup_count", 10))
@@ -159,8 +158,7 @@ def _load_index_html() -> str:
 
 
 async def homepage(request):
-    html = _load_index_html().replace("{{MCP_PATH}}", MCP_PATH)
-    return HTMLResponse(html)
+    return HTMLResponse(_load_index_html())
 
 
 async def api_messages(request):
@@ -211,7 +209,7 @@ OPENAPI_SPEC = {
             }
         },
         "/api/channels": {"get": {"summary": "List channels", "responses": {"200": {"description": "Channels list"}}}},
-        "/mcp/mcp": {
+        "/mcp": {
             "post": {
                 "summary": "MCP endpoint (Streamable HTTP)",
                 "description": "MCP tools: post_message, fetch_messages, list_channels. Requires MCP session handshake (initialize, notifications/initialized).",
@@ -231,7 +229,7 @@ async def docs_page(request):
 <html><head><title>API Docs</title></head><body>
 <h1>Claude-Codex MCP Relay</h1>
 <h2>MCP Endpoint</h2>
-<p><code>{mcp_path}/mcp</code> (Streamable HTTP, requires session handshake)</p>
+<p><code>/mcp</code> (Streamable HTTP, requires session handshake)</p>
 <h2>MCP Tools</h2>
 <ul>
   <li><code>post_message(target, sender, text)</code> - Post message to a channel</li>
@@ -245,7 +243,7 @@ async def docs_page(request):
   <li><code>GET /healthz</code></li>
 </ul>
 <p><a href="/openapi.json">OpenAPI spec</a></p>
-</body></html>""".format(mcp_path=MCP_PATH)
+</body></html>"""
     return HTMLResponse(html)
 
 
@@ -292,7 +290,7 @@ _app = Starlette(
         Route("/openapi.json", openapi_json, methods=["GET"]),
         Route("/api/messages", api_messages, methods=["GET"]),
         Route("/api/channels", api_channels, methods=["GET"]),
-        Mount(MCP_PATH, app=mcp.streamable_http_app(), name="mcp"),
+        Mount("", app=mcp.streamable_http_app(), name="mcp"),  # MCP endpoint at /mcp
     ],
     lifespan=lifespan,
 )

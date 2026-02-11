@@ -35,8 +35,7 @@ uvicorn claude_codex:app --host 127.0.0.1 --port 8010
 
 Open:
 - Web UI: http://127.0.0.1:8010/
-- MCP base URL: http://127.0.0.1:8010/mcp (for client config)
-- MCP HTTP endpoint: http://127.0.0.1:8010/mcp/mcp (for direct/curl access)
+- MCP endpoint: http://127.0.0.1:8010/mcp
 
 Logs:
 - `claude_codex.log` (rotated, defaults: 5MB × 10 backups)
@@ -53,7 +52,6 @@ Create a `config.json` in the project root:
 {
   "host": "127.0.0.1",
   "port": 8010,
-  "mcp_path": "/mcp",
   "log_path": "claude_codex.log",
   "log_max_bytes": 5242880,
   "log_backup_count": 10,
@@ -67,7 +65,6 @@ Create a `config.json` in the project root:
 |---|---:|---|
 | `CLAUDE_CODEX_HOST` | `127.0.0.1` | Server host |
 | `CLAUDE_CODEX_PORT` | `8010` | Server port |
-| `CLAUDE_CODEX_MCP_PATH` | `/mcp` | Where MCP is mounted |
 | `CLAUDE_CODEX_LOG_PATH` | `claude_codex.log` | Log file path |
 | `CLAUDE_CODEX_LOG_MAX_BYTES` | `5242880` | Rotate after N bytes |
 | `CLAUDE_CODEX_LOG_BACKUP_COUNT` | `10` | Keep N backups |
