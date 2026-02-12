@@ -6,23 +6,49 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root {
+      color-scheme: light;
       --bg: #f7f7f8;
+      --page-glow: #ecfeff;
       --surface: #ffffff;
+      --surface-rgb: 255, 255, 255;
       --surface-alt: #f1f5f9;
       --text: #111827;
       --muted: #6b7280;
       --border: #e5e7eb;
       --accent: #10a37f;
       --accent-strong: #0f8f70;
+      --danger: #b91c1c;
+      --code-border: #111827;
       --code-bg: #1f2937;
       --code-text: #e5e7eb;
+      --shadow-soft: rgba(15, 23, 42, 0.04);
+      --shadow: rgba(15, 23, 42, 0.06);
       --collapsed-lines: 3;
+    }
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --bg: #0b1117;
+      --page-glow: #123047;
+      --surface: #111827;
+      --surface-rgb: 17, 24, 39;
+      --surface-alt: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --border: #334155;
+      --accent: #18b58c;
+      --accent-strong: #2dd4a1;
+      --danger: #f87171;
+      --code-border: #475569;
+      --code-bg: #0f172a;
+      --code-text: #e2e8f0;
+      --shadow-soft: rgba(2, 6, 23, 0.35);
+      --shadow: rgba(2, 6, 23, 0.55);
     }
     body {
       font-family: "Soehne", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
       margin: 0;
       padding: 24px;
-      background: radial-gradient(circle at top right, #ecfeff 0%, var(--bg) 38%);
+      background: radial-gradient(circle at top right, var(--page-glow) 0%, var(--bg) 38%);
       color: var(--text);
     }
     header { display:flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
@@ -40,13 +66,15 @@
     button { cursor: pointer; }
     #reload { border-color: rgba(16, 163, 127, 0.5); color: var(--accent-strong); }
     #reload:hover { background: rgba(16, 163, 127, 0.08); }
+    #themeToggle { border-color: rgba(16, 163, 127, 0.35); margin-left: auto; }
+    #themeToggle:hover { background: rgba(16, 163, 127, 0.12); }
     .composer {
       border: 1px solid var(--border);
       border-radius: 14px;
       background: var(--surface);
       padding: 12px;
       margin-bottom: 14px;
-      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+      box-shadow: 0 1px 2px var(--shadow-soft);
     }
     .composer-head {
       display: flex;
@@ -85,7 +113,7 @@
       color: var(--accent-strong);
     }
     #postStatus.error {
-      color: #b91c1c;
+      color: var(--danger);
     }
     .msg {
       border: 1px solid var(--border);
@@ -93,10 +121,10 @@
       padding: 14px 16px;
       margin: 12px 0;
       background: var(--surface);
-      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+      box-shadow: 0 1px 2px var(--shadow);
     }
     .meta { display:flex; gap: 10px; align-items:center; margin-bottom: 10px; color: var(--muted); font-size: 12px; flex-wrap: wrap; }
-    .badge { padding: 3px 9px; border-radius: 999px; background: var(--surface-alt); color: #334155; }
+    .badge { padding: 3px 9px; border-radius: 999px; background: var(--surface-alt); color: var(--text); }
     .meta .badge:first-child { background: rgba(16, 163, 127, 0.12); color: var(--accent-strong); }
     .msg-content {
       position: relative;
@@ -119,7 +147,7 @@
       right: 0;
       bottom: 0;
       height: 2.2em;
-      background: linear-gradient(to bottom, rgba(255, 255, 255, 0), var(--surface));
+      background: linear-gradient(to bottom, rgba(var(--surface-rgb), 0), var(--surface));
       pointer-events: none;
     }
     .toggle {
@@ -140,7 +168,7 @@
       overflow:auto;
       padding: 11px;
       border-radius: 10px;
-      border: 1px solid #111827;
+      border: 1px solid var(--code-border);
       background: var(--code-bg);
       color: var(--code-text);
     }
@@ -169,6 +197,7 @@
     <select id="channel"></select>
     <button id="reload">Reload</button>
     <span class="muted">Use a shared channel like <span class="mono">proj-x</span> for one combined thread.</span>
+    <button id="themeToggle" type="button" aria-pressed="false">Dark mode</button>
   </div>
 
   <div class="composer">
@@ -195,6 +224,7 @@
     const listEl = document.getElementById("list");
     const chanEl = document.getElementById("channel");
     const reloadBtn = document.getElementById("reload");
+    const themeToggleEl = document.getElementById("themeToggle");
     const mcpEndpointEl = document.getElementById("mcpEndpoint");
     const postTargetEl = document.getElementById("postTarget");
     const postSenderEl = document.getElementById("postSender");
@@ -202,11 +232,45 @@
     const sendBtn = document.getElementById("send");
     const postStatusEl = document.getElementById("postStatus");
     const DEFAULT_SENDERS = ["web-ui", "codex", "claude", "user"];
+    const THEME_COOKIE_NAME = "relay_theme";
+    const THEME_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
     function escapeHtml(s) {
       return (s ?? "").toString()
         .replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;")
         .replaceAll('"',"&quot;").replaceAll("'","&#039;");
+    }
+
+    function setCookie(name, value, maxAgeSeconds = THEME_COOKIE_MAX_AGE_SECONDS) {
+      document.cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${maxAgeSeconds}; Path=/; SameSite=Lax`;
+    }
+
+    function getCookie(name) {
+      const key = `${name}=`;
+      const found = document.cookie
+        .split(";")
+        .map((part) => part.trim())
+        .find((part) => part.startsWith(key));
+      return found ? decodeURIComponent(found.slice(key.length)) : "";
+    }
+
+    function applyTheme(theme, persist = false) {
+      const resolved = theme === "dark" ? "dark" : "light";
+      document.documentElement.setAttribute("data-theme", resolved);
+      const isDark = resolved === "dark";
+      themeToggleEl.textContent = isDark ? "Light mode" : "Dark mode";
+      themeToggleEl.setAttribute("aria-pressed", isDark ? "true" : "false");
+      if (persist) setCookie(THEME_COOKIE_NAME, resolved);
+    }
+
+    function initTheme() {
+      const saved = getCookie(THEME_COOKIE_NAME);
+      if (saved === "light" || saved === "dark") {
+        applyTheme(saved);
+        return;
+      }
+      const prefersDark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(prefersDark ? "dark" : "light");
     }
 
     // Supports fenced code blocks ```lang ... ```
@@ -366,6 +430,10 @@
     }
 
     reloadBtn.addEventListener("click", load);
+    themeToggleEl.addEventListener("click", () => {
+      const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+      applyTheme(current === "dark" ? "light" : "dark", true);
+    });
     chanEl.addEventListener("change", load);
     sendBtn.addEventListener("click", postMessage);
     postTextEl.addEventListener("keydown", (event) => {
@@ -376,6 +444,7 @@
     });
 
     (async () => {
+      initTheme();
       await loadChannels();
       await load();
       setInterval(load, 1200);
