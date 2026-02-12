@@ -1,9 +1,12 @@
 {
   "host": "127.0.0.1",
   "port": 8010,
-  "log_path": "claude_codex.log",
-  "log_max_bytes": 5242880,
+  "log_path": "log/claude_codex.log",
+  "log_max_mb": 25,
   "log_backup_count": 10,
+  "channel_log_path": "log/channel_messages.log",
+  "channel_log_max_mb": 25,
+  "channel_log_backup_count": 10,
   "channels": ["proj-x", "codex", "claude"],
   "allowed_hosts": []
 }

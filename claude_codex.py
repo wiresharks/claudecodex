@@ -40,11 +40,34 @@ def _get_config(key: str, default: Any = None) -> Any:
     return os.environ.get(env_key, default)
 
 
+def _as_positive_int(value: Any, key_name: str) -> int:
+    out = int(value)
+    if out <= 0:
+        raise ValueError(f"{key_name} must be > 0")
+    return out
+
+
+def _get_rotating_max_bytes(max_mb_key: str, legacy_max_bytes_key: str, default_mb: int = 25) -> int:
+    max_mb = _get_config(max_mb_key, None)
+    if max_mb is not None:
+        return _as_positive_int(max_mb, max_mb_key) * 1024 * 1024
+
+    legacy_bytes = _get_config(legacy_max_bytes_key, None)
+    if legacy_bytes is not None:
+        return _as_positive_int(legacy_bytes, legacy_max_bytes_key)
+
+    return default_mb * 1024 * 1024
+
+
 HOST = _get_config("host", "127.0.0.1")
 PORT = int(_get_config("port", 8010))
-LOG_PATH = _get_config("log_path", "claude_codex.log")
-LOG_MAX_BYTES = int(_get_config("log_max_bytes", 5 * 1024 * 1024))
+_DEFAULT_LOG_DIR = _BASE_DIR / "log"
+LOG_PATH = str(_get_config("log_path", str(_DEFAULT_LOG_DIR / "claude_codex.log")))
+LOG_MAX_BYTES = _get_rotating_max_bytes("log_max_mb", "log_max_bytes", default_mb=25)
 LOG_BACKUP_COUNT = int(_get_config("log_backup_count", 10))
+CHANNEL_LOG_PATH = str(_get_config("channel_log_path", str(_DEFAULT_LOG_DIR / "channel_messages.log")))
+CHANNEL_LOG_MAX_BYTES = _get_rotating_max_bytes("channel_log_max_mb", "channel_log_max_bytes", default_mb=25)
+CHANNEL_LOG_BACKUP_COUNT = int(_get_config("channel_log_backup_count", 10))
 
 _channels_raw = _get_config("channels", "proj-x,codex,claude")
 DEFAULT_CHANNELS = _channels_raw if isinstance(_channels_raw, list) else _channels_raw.split(",")
@@ -58,9 +81,26 @@ _ALLOWED_HOSTS: list[str] = (
 # -----------------------------------------------------------------------------
 # Logging (rotating)
 # -----------------------------------------------------------------------------
+def _has_rotating_handler(logger_obj: logging.Logger, file_path: str) -> bool:
+    target = Path(file_path).resolve()
+    for existing in logger_obj.handlers:
+        if isinstance(existing, RotatingFileHandler):
+            try:
+                if Path(existing.baseFilename).resolve() == target:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def _ensure_parent_dir(file_path: str) -> None:
+    Path(file_path).expanduser().resolve().parent.mkdir(parents=True, exist_ok=True)
+
+
 logger = logging.getLogger("claude_codex")
 logger.setLevel(logging.INFO)
 
+_ensure_parent_dir(LOG_PATH)
 _handler = RotatingFileHandler(
     LOG_PATH,
     maxBytes=LOG_MAX_BYTES,
@@ -68,7 +108,23 @@ _handler = RotatingFileHandler(
     encoding="utf-8",
 )
 _handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-logger.addHandler(_handler)
+if not _has_rotating_handler(logger, LOG_PATH):
+    logger.addHandler(_handler)
+
+channel_logger = logging.getLogger("claude_codex.channel_messages")
+channel_logger.setLevel(logging.INFO)
+channel_logger.propagate = False
+
+_ensure_parent_dir(CHANNEL_LOG_PATH)
+_channel_handler = RotatingFileHandler(
+    CHANNEL_LOG_PATH,
+    maxBytes=CHANNEL_LOG_MAX_BYTES,
+    backupCount=CHANNEL_LOG_BACKUP_COUNT,
+    encoding="utf-8",
+)
+_channel_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
+if not _has_rotating_handler(channel_logger, CHANNEL_LOG_PATH):
+    channel_logger.addHandler(_channel_handler)
 
 # -----------------------------------------------------------------------------
 # Message store (in-memory)
@@ -92,6 +148,54 @@ def _append_message(target: str, sender: str, text: str) -> dict[str, Any]:
     return msg
 
 
+def _log_channel_message(msg: dict[str, Any], source: str) -> None:
+    channel_logger.info(
+        json.dumps(
+            {
+                "id": msg["id"],
+                "ts": msg["ts"],
+                "target": msg["target"],
+                "sender": msg["sender"],
+                "text": msg["text"],
+                "source": source,
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+async def _store_message(target: str, sender: str, text: str, source: str) -> dict[str, Any]:
+    target = (target or "").strip()
+    sender = (sender or "").strip()
+    text = "" if text is None else str(text)
+
+    if not target:
+        raise ValueError("target is required")
+    if not sender:
+        raise ValueError("sender is required")
+    if not text.strip():
+        raise ValueError("text is required")
+
+    async with _lock:
+        msg = _append_message(target=target, sender=sender, text=text)
+
+    logger.info(
+        "post_message %s",
+        json.dumps(
+            {
+                "id": msg["id"],
+                "target": target,
+                "sender": sender,
+                "text_len": len(text),
+                "source": source,
+            },
+            ensure_ascii=False,
+        ),
+    )
+    _log_channel_message(msg, source=source)
+    return msg
+
+
 # -----------------------------------------------------------------------------
 # MCP server (Streamable HTTP)
 # -----------------------------------------------------------------------------
@@ -110,16 +214,7 @@ async def post_message(target: str, sender: str, text: str) -> dict[str, Any]:
     Post a message into a target inbox (channel).
     Typical targets: "codex", "claude", or a shared channel like "proj-x".
     """
-    async with _lock:
-        msg = _append_message(target=target, sender=sender, text=text)
-
-    logger.info(
-        "post_message %s",
-        json.dumps(
-            {"id": msg["id"], "target": target, "sender": sender, "text_len": len(text)},
-            ensure_ascii=False,
-        ),
-    )
+    msg = await _store_message(target=target, sender=sender, text=text, source="mcp")
     return {"ok": True, "posted": msg["id"]}
 
 
@@ -186,6 +281,27 @@ async def api_messages(request):
     return JSONResponse({"target": target, "messages": msgs})
 
 
+async def api_post_message(request):
+    try:
+        payload = await request.json()
+    except json.JSONDecodeError:
+        return JSONResponse({"ok": False, "error": "Request body must be valid JSON"}, status_code=400)
+
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "Request body must be a JSON object"}, status_code=400)
+
+    target = payload.get("target", "")
+    sender = payload.get("sender", "")
+    text = payload.get("text", "")
+
+    try:
+        msg = await _store_message(target=target, sender=sender, text=text, source="web-ui")
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+    return JSONResponse({"ok": True, "posted": msg["id"], "message": msg}, status_code=201)
+
+
 async def api_channels(request):
     async with _lock:
         observed = sorted({m["target"] for m in _messages})
@@ -219,6 +335,26 @@ OPENAPI_SPEC = {
                     {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 200}},
                 ],
                 "responses": {"200": {"description": "Messages list"}},
+            },
+            "post": {
+                "summary": "Post a message to a channel",
+                "requestBody": {
+                    "required": True,
+                    "content": {
+                        "application/json": {
+                            "schema": {
+                                "type": "object",
+                                "required": ["target", "sender", "text"],
+                                "properties": {
+                                    "target": {"type": "string"},
+                                    "sender": {"type": "string"},
+                                    "text": {"type": "string"},
+                                },
+                            }
+                        }
+                    },
+                },
+                "responses": {"201": {"description": "Created"}, "400": {"description": "Validation error"}},
             }
         },
         "/api/channels": {"get": {"summary": "List channels", "responses": {"200": {"description": "Channels list"}}}},
@@ -252,6 +388,7 @@ async def docs_page(request):
 <h2>HTTP API</h2>
 <ul>
   <li><code>GET /api/messages?target=...&limit=...</code></li>
+  <li><code>POST /api/messages</code> JSON body: <code>{"target","sender","text"}</code></li>
   <li><code>GET /api/channels</code></li>
   <li><code>GET /healthz</code></li>
 </ul>
@@ -302,6 +439,7 @@ _app = Starlette(
         Route("/docs", docs_page, methods=["GET"]),
         Route("/openapi.json", openapi_json, methods=["GET"]),
         Route("/api/messages", api_messages, methods=["GET"]),
+        Route("/api/messages", api_post_message, methods=["POST"]),
         Route("/api/channels", api_channels, methods=["GET"]),
         Mount("", app=mcp.streamable_http_app(), name="mcp"),  # MCP endpoint at /mcp
     ],

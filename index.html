@@ -5,24 +5,158 @@
   <title>MCP Relay Conversation</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; margin: 24px; }
+    :root {
+      --bg: #f7f7f8;
+      --surface: #ffffff;
+      --surface-alt: #f1f5f9;
+      --text: #111827;
+      --muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #10a37f;
+      --accent-strong: #0f8f70;
+      --code-bg: #1f2937;
+      --code-text: #e5e7eb;
+      --collapsed-lines: 3;
+    }
+    body {
+      font-family: "Soehne", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: radial-gradient(circle at top right, #ecfeff 0%, var(--bg) 38%);
+      color: var(--text);
+    }
     header { display:flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
-    h1 { font-size: 18px; margin: 0; }
-    .muted { color: #666; font-size: 13px; }
+    h1 { font-size: 20px; margin: 0; }
+    .muted { color: var(--muted); font-size: 13px; }
     .row { display:flex; gap: 10px; align-items:center; margin: 14px 0; flex-wrap: wrap; }
-    input, select { padding: 6px 8px; font-size: 14px; }
-    button { padding: 6px 10px; font-size: 14px; cursor: pointer; }
-    .msg { border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px; margin: 10px 0; }
-    .meta { display:flex; gap: 10px; align-items:center; margin-bottom: 8px; color:#444; font-size: 12px; flex-wrap: wrap; }
-    .badge { padding: 2px 8px; border-radius: 999px; background: #f2f2f2; }
-    pre { overflow:auto; padding: 10px; border-radius: 8px; }
-    code { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    select, button, textarea { padding: 7px 11px; font-size: 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+    textarea {
+      width: 100%;
+      min-height: 86px;
+      resize: vertical;
+      line-height: 1.45;
+      font-family: inherit;
+    }
+    button { cursor: pointer; }
+    #reload { border-color: rgba(16, 163, 127, 0.5); color: var(--accent-strong); }
+    #reload:hover { background: rgba(16, 163, 127, 0.08); }
+    .composer {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--surface);
+      padding: 12px;
+      margin-bottom: 14px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    .composer-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    .composer-head label {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    #postTarget, #postSender {
+      min-width: 120px;
+    }
+    #send {
+      margin-left: auto;
+      border-color: rgba(16, 163, 127, 0.65);
+      background: var(--accent);
+      color: #ffffff;
+      font-weight: 600;
+    }
+    #send:hover {
+      background: var(--accent-strong);
+    }
+    #send:disabled {
+      opacity: 0.65;
+      cursor: default;
+    }
+    #postStatus {
+      min-height: 1.2em;
+      margin-top: 7px;
+      font-size: 13px;
+    }
+    #postStatus.ok {
+      color: var(--accent-strong);
+    }
+    #postStatus.error {
+      color: #b91c1c;
+    }
+    .msg {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin: 12px 0;
+      background: var(--surface);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    }
+    .meta { display:flex; gap: 10px; align-items:center; margin-bottom: 10px; color: var(--muted); font-size: 12px; flex-wrap: wrap; }
+    .badge { padding: 3px 9px; border-radius: 999px; background: var(--surface-alt); color: #334155; }
+    .meta .badge:first-child { background: rgba(16, 163, 127, 0.12); color: var(--accent-strong); }
+    .msg-content {
+      position: relative;
+      line-height: 1.5;
+    }
+    .msg-content > * {
+      margin: 0 0 10px 0;
+    }
+    .msg-content > :last-child {
+      margin-bottom: 0;
+    }
+    .msg-content.collapsed {
+      max-height: calc(var(--collapsed-lines) * 1.5em);
+      overflow: hidden;
+    }
+    .msg-content.collapsed::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 2.2em;
+      background: linear-gradient(to bottom, rgba(255, 255, 255, 0), var(--surface));
+      pointer-events: none;
+    }
+    .toggle {
+      margin-top: 8px;
+      padding: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: var(--accent-strong);
+      font-size: 13px;
+      font-weight: 600;
+    }
+    .toggle:hover {
+      text-decoration: underline;
+      color: var(--accent);
+    }
+    pre {
+      overflow:auto;
+      padding: 11px;
+      border-radius: 10px;
+      border: 1px solid #111827;
+      background: var(--code-bg);
+      color: var(--code-text);
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 13px;
+    }
+    .hljs {
+      background: transparent !important;
+    }
     .text { white-space: pre-wrap; }
-    .footer { margin-top: 20px; font-size: 12px; color: #666; }
+    .footer { margin-top: 20px; font-size: 12px; color: var(--muted); }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
   </style>
   <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/default.min.css">
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
 </head>
 <body>
   <header>
@@ -35,6 +169,18 @@
     <select id="channel"></select>
     <button id="reload">Reload</button>
     <span class="muted">Use a shared channel like <span class="mono">proj-x</span> for one combined thread.</span>
+  </div>
+
+  <div class="composer">
+    <div class="composer-head">
+      <label for="postTarget">Post to</label>
+      <select id="postTarget"></select>
+      <label for="postSender">Sender</label>
+      <select id="postSender"></select>
+      <button id="send" type="button">Send</button>
+    </div>
+    <textarea id="postText" placeholder="Write message text... (Ctrl/Cmd+Enter to send)"></textarea>
+    <div id="postStatus"></div>
   </div>
 
   <div id="list"></div>
@@ -50,6 +196,12 @@
     const chanEl = document.getElementById("channel");
     const reloadBtn = document.getElementById("reload");
     const mcpEndpointEl = document.getElementById("mcpEndpoint");
+    const postTargetEl = document.getElementById("postTarget");
+    const postSenderEl = document.getElementById("postSender");
+    const postTextEl = document.getElementById("postText");
+    const sendBtn = document.getElementById("send");
+    const postStatusEl = document.getElementById("postStatus");
+    const DEFAULT_SENDERS = ["web-ui", "codex", "claude", "user"];
 
     function escapeHtml(s) {
       return (s ?? "").toString()
@@ -84,12 +236,64 @@
       return html;
     }
 
+    function setupCollapsibleMessages() {
+      document.querySelectorAll(".msg-body").forEach((body) => {
+        const content = body.querySelector(".msg-content");
+        const toggle = body.querySelector(".toggle");
+        if (!content || !toggle) return;
+
+        content.classList.remove("expanded");
+        content.classList.add("collapsed");
+        toggle.hidden = true;
+        toggle.textContent = "Show more";
+        toggle.setAttribute("aria-expanded", "false");
+
+        if (content.scrollHeight > content.clientHeight + 1) {
+          toggle.hidden = false;
+          toggle.onclick = () => {
+            const expanded = !content.classList.contains("expanded");
+            content.classList.toggle("expanded", expanded);
+            content.classList.toggle("collapsed", !expanded);
+            toggle.textContent = expanded ? "Show less" : "Show more";
+            toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+          };
+        } else {
+          content.classList.remove("collapsed");
+        }
+      });
+    }
+
+    function setSelectOptions(selectEl, values, fallbackValue = "") {
+      const previous = selectEl.value;
+      const uniq = [...new Set((values || []).map(v => (v || "").trim()).filter(Boolean))];
+      if (!uniq.length && fallbackValue) uniq.push(fallbackValue);
+      selectEl.innerHTML = uniq.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join("");
+      const next = uniq.includes(previous)
+        ? previous
+        : (uniq.includes(fallbackValue) ? fallbackValue : (uniq[0] || ""));
+      if (next) selectEl.value = next;
+    }
+
+    function setPostStatus(text, type = "") {
+      postStatusEl.textContent = text || "";
+      postStatusEl.className = type || "";
+    }
+
+    function updateSenderOptions(messages) {
+      const observed = new Set(DEFAULT_SENDERS);
+      (messages || []).forEach((m) => {
+        const sender = (m && m.sender ? `${m.sender}` : "").trim();
+        if (sender) observed.add(sender);
+      });
+      setSelectOptions(postSenderEl, Array.from(observed), DEFAULT_SENDERS[0]);
+    }
+
     async function loadChannels() {
       const res = await fetch(`/api/channels`);
       const data = await res.json();
       const chans = data.channels || ["proj-x","codex","claude"];
-      chanEl.innerHTML = chans.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`).join("");
-      if (!chanEl.value) chanEl.value = chans[0] || "proj-x";
+      setSelectOptions(chanEl, chans, chans[0] || "proj-x");
+      setSelectOptions(postTargetEl, chans, postTargetEl.value || chanEl.value || chans[0] || "proj-x");
     }
 
     async function load() {
@@ -98,6 +302,7 @@
       const data = await res.json();
 
       const items = data.messages || [];
+      updateSenderOptions(items);
       listEl.innerHTML = items.map(m => {
         const ts = new Date((m.ts || 0) * 1000).toLocaleString();
         return `
@@ -108,16 +313,67 @@
               <span class="badge">from: ${escapeHtml(m.sender)}</span>
               <span class="muted">${escapeHtml(ts)}</span>
             </div>
-            ${renderText(m.text)}
+            <div class="msg-body">
+              <div class="msg-content collapsed">
+                ${renderText(m.text)}
+              </div>
+              <button class="toggle" type="button" hidden aria-expanded="false">Show more</button>
+            </div>
           </div>
         `;
       }).join("");
 
       document.querySelectorAll("pre code").forEach(el => hljs.highlightElement(el));
+      setupCollapsibleMessages();
       mcpEndpointEl.textContent = location.origin + "/mcp";
     }
 
+    async function postMessage() {
+      const target = (postTargetEl.value || "").trim();
+      const sender = (postSenderEl.value || "").trim();
+      const text = postTextEl.value || "";
+
+      if (!target || !sender || !text.trim()) {
+        setPostStatus("Channel, sender, and message text are required.", "error");
+        return;
+      }
+
+      sendBtn.disabled = true;
+      setPostStatus("Sending...");
+      try {
+        const res = await fetch(`/api/messages`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ target, sender, text }),
+        });
+        let data = {};
+        try {
+          data = await res.json();
+        } catch {
+          data = {};
+        }
+        if (!res.ok) {
+          throw new Error(data.error || `Request failed with status ${res.status}`);
+        }
+        postTextEl.value = "";
+        setPostStatus(`Sent #${data.posted} to ${target}.`, "ok");
+        await load();
+      } catch (err) {
+        setPostStatus(`Send failed: ${err.message || err}`, "error");
+      } finally {
+        sendBtn.disabled = false;
+      }
+    }
+
     reloadBtn.addEventListener("click", load);
+    chanEl.addEventListener("change", load);
+    sendBtn.addEventListener("click", postMessage);
+    postTextEl.addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault();
+        postMessage();
+      }
+    });
 
     (async () => {
       await loadChannels();
