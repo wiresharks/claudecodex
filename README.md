@@ -4,8 +4,8 @@ This runs a **single Python MCP server** that both **Claude Code** and **Codex (
 
 It provides:
 - MCP tools: `post_message`, `fetch_messages`, `list_channels`
-- Rotating log file (all tool usage)
-- A tiny web UI that renders conversations and highlights fenced code blocks
+- Rotating log files (tool usage + channel message archive)
+- A tiny web UI that renders conversations, highlights fenced code blocks, and can post messages
 
 ## 1) Setup
 
@@ -38,7 +38,8 @@ Open:
 - MCP endpoint: http://127.0.0.1:8010/mcp
 
 Logs:
-- `claude_codex.log` (rotated, defaults: 5MB × 10 backups)
+- `log/claude_codex.log` (rotated, defaults: 25MB × 10 backups)
+- `log/channel_messages.log` (rotated, defaults: 25MB × 10 backups)
 
 ## 3) Configuration
 
@@ -52,9 +53,12 @@ Create a `config.json` in the project root:
 {
   "host": "127.0.0.1",
   "port": 8010,
-  "log_path": "claude_codex.log",
-  "log_max_bytes": 5242880,
+  "log_path": "log/claude_codex.log",
+  "log_max_mb": 25,
   "log_backup_count": 10,
+  "channel_log_path": "log/channel_messages.log",
+  "channel_log_max_mb": 25,
+  "channel_log_backup_count": 10,
   "channels": ["proj-x", "codex", "claude"],
   "allowed_hosts": []
 }
@@ -66,11 +70,16 @@ Create a `config.json` in the project root:
 |---|---:|---|
 | `CLAUDE_CODEX_HOST` | `127.0.0.1` | Server host |
 | `CLAUDE_CODEX_PORT` | `8010` | Server port |
-| `CLAUDE_CODEX_LOG_PATH` | `claude_codex.log` | Log file path |
-| `CLAUDE_CODEX_LOG_MAX_BYTES` | `5242880` | Rotate after N bytes |
+| `CLAUDE_CODEX_LOG_PATH` | `log/claude_codex.log` | Log file path |
+| `CLAUDE_CODEX_LOG_MAX_MB` | `25` | Rotate after N MB |
 | `CLAUDE_CODEX_LOG_BACKUP_COUNT` | `10` | Keep N backups |
+| `CLAUDE_CODEX_CHANNEL_LOG_PATH` | `log/channel_messages.log` | Channel message archive log path |
+| `CLAUDE_CODEX_CHANNEL_LOG_MAX_MB` | `25` | Rotate channel log after N MB |
+| `CLAUDE_CODEX_CHANNEL_LOG_BACKUP_COUNT` | `10` | Keep N channel log backups |
 | `CLAUDE_CODEX_CHANNELS` | `proj-x,codex,claude` | Seed list of channels |
 | `CLAUDE_CODEX_ALLOWED_HOSTS` | *(empty)* | Extra hosts for MCP DNS-rebinding protection (comma-separated) |
+
+Legacy compatibility: `log_max_bytes` / `channel_log_max_bytes` (and env `..._MAX_BYTES`) are still accepted.
 
 Example:
 ```bash
