@@ -55,7 +55,7 @@
     h1 { font-size: 20px; margin: 0; }
     .muted { color: var(--muted); font-size: 13px; }
     .row { display:flex; gap: 10px; align-items:center; margin: 14px 0; flex-wrap: wrap; }
-    select, button, textarea { padding: 7px 11px; font-size: 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+    select, button, textarea { padding: 7px 11px; font-size: 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface); color: var(--text); box-sizing: border-box; }
     textarea {
       width: 100%;
       min-height: 86px;
@@ -172,6 +172,13 @@
       background: var(--code-bg);
       color: var(--code-text);
     }
+    :not(pre) > code {
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: var(--surface-alt);
+      color: var(--text);
+    }
     code {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
       font-size: 13px;
@@ -220,6 +227,8 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
   <script>
     const listEl = document.getElementById("list");
     const chanEl = document.getElementById("channel");
@@ -231,6 +240,8 @@
     const postTextEl = document.getElementById("postText");
     const sendBtn = document.getElementById("send");
     const postStatusEl = document.getElementById("postStatus");
+    const expandedMessageIds = new Set();
+    let lastRenderKey = "";
     const DEFAULT_SENDERS = ["web-ui", "codex", "claude", "user"];
     const THEME_COOKIE_NAME = "relay_theme";
     const THEME_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
@@ -273,37 +284,41 @@
       applyTheme(prefersDark ? "dark" : "light");
     }
 
-    // Supports fenced code blocks ```lang ... ```
     function renderText(text) {
-      const t = text || "";
-      const parts = t.split(/```/g);
-      if (parts.length === 1) {
-        return `<div class="text">${escapeHtml(t)}</div>`;
+      const t = (text || "").toString();
+
+      // Markdown rendering with code highlighting.
+      if (window.marked) {
+        marked.setOptions({
+          gfm: true,
+          breaks: true,
+          highlight(code, lang) {
+            const requested = (lang || "").trim();
+            try {
+              if (requested && hljs.getLanguage(requested)) {
+                return hljs.highlight(code, { language: requested }).value;
+              }
+              return hljs.highlightAuto(code).value;
+            } catch {
+              return escapeHtml(code);
+            }
+          },
+        });
+
+        const rawHtml = marked.parse(t);
+        // Sanitize rendered HTML before insertion.
+        return window.DOMPurify ? DOMPurify.sanitize(rawHtml) : rawHtml;
       }
-      let html = "";
-      for (let i = 0; i < parts.length; i++) {
-        const chunk = parts[i];
-        if (i % 2 === 0) {
-          if (chunk) html += `<div class="text">${escapeHtml(chunk)}</div>`;
-        } else {
-          const firstNewline = chunk.indexOf("\n");
-          let lang = "";
-          let code = chunk;
-          if (firstNewline !== -1) {
-            lang = chunk.slice(0, firstNewline).trim();
-            code = chunk.slice(firstNewline + 1);
-          }
-          const langClass = lang ? `language-${escapeHtml(lang)}` : "";
-          html += `<pre><code class="${langClass}">${escapeHtml(code)}</code></pre>`;
-        }
-      }
-      return html;
+
+      // Fallback: plain escaped text.
+      return `<div class="text">${escapeHtml(t)}</div>`;
     }
 
     function setupCollapsibleMessages() {
       document.querySelectorAll(".msg-body").forEach((body) => {
         const content = body.querySelector(".msg-content");
         const toggle = body.querySelector(".toggle");
+        const msgId = body.dataset.msgId || "";
         if (!content || !toggle) return;
 
         content.classList.remove("expanded");
@@ -314,15 +329,27 @@
 
         if (content.scrollHeight > content.clientHeight + 1) {
           toggle.hidden = false;
+          if (expandedMessageIds.has(msgId)) {
+            content.classList.add("expanded");
+            content.classList.remove("collapsed");
+            toggle.textContent = "Show less";
+            toggle.setAttribute("aria-expanded", "true");
+          }
           toggle.onclick = () => {
             const expanded = !content.classList.contains("expanded");
             content.classList.toggle("expanded", expanded);
             content.classList.toggle("collapsed", !expanded);
             toggle.textContent = expanded ? "Show less" : "Show more";
             toggle.setAttribute("aria-expanded", expanded ? "true" : "false");
+            if (expanded) {
+              expandedMessageIds.add(msgId);
+            } else {
+              expandedMessageIds.delete(msgId);
+            }
           };
         } else {
           content.classList.remove("collapsed");
+          expandedMessageIds.delete(msgId);
         }
       });
     }
@@ -360,13 +387,23 @@
       setSelectOptions(postTargetEl, chans, postTargetEl.value || chanEl.value || chans[0] || "proj-x");
     }
 
-    async function load() {
+    async function load({ force = false } = {}) {
       const target = chanEl.value || "proj-x";
       const res = await fetch(`/api/messages?target=${encodeURIComponent(target)}&limit=200`);
       const data = await res.json();
 
       const items = data.messages || [];
       updateSenderOptions(items);
+      const renderKey = items.map((m) => `${m.id}:${m.ts}:${(m.text || "").length}`).join("|");
+      if (!force && renderKey === lastRenderKey) {
+        mcpEndpointEl.textContent = location.origin + "/mcp";
+        return;
+      }
+
+      const prevScrollY = window.scrollY;
+      const prevDocHeight = document.documentElement.scrollHeight;
+      const wasNearBottom = (prevDocHeight - (prevScrollY + window.innerHeight)) < 40;
+
       listEl.innerHTML = items.map(m => {
         const ts = new Date((m.ts || 0) * 1000).toLocaleString();
         return `
@@ -377,7 +414,7 @@
               <span class="badge">from: ${escapeHtml(m.sender)}</span>
               <span class="muted">${escapeHtml(ts)}</span>
             </div>
-            <div class="msg-body">
+            <div class="msg-body" data-msg-id="${m.id}">
               <div class="msg-content collapsed">
                 ${renderText(m.text)}
               </div>
@@ -387,9 +424,24 @@
         `;
       }).join("");
 
-      document.querySelectorAll("pre code").forEach(el => hljs.highlightElement(el));
+      // Ensure code blocks are highlighted even if markdown parser didn't pre-highlight.
+      document.querySelectorAll("pre code").forEach(el => {
+        if (!el.classList.contains("hljs")) {
+          hljs.highlightElement(el);
+        }
+      });
       setupCollapsibleMessages();
       mcpEndpointEl.textContent = location.origin + "/mcp";
+      lastRenderKey = renderKey;
+
+      // Keep viewport stable across polling re-renders.
+      const newDocHeight = document.documentElement.scrollHeight;
+      if (wasNearBottom) {
+        window.scrollTo({ top: newDocHeight });
+      } else {
+        const delta = newDocHeight - prevDocHeight;
+        window.scrollTo({ top: Math.max(0, prevScrollY + delta) });
+      }
     }
 
     async function postMessage() {
@@ -429,12 +481,15 @@
       }
     }
 
-    reloadBtn.addEventListener("click", load);
+    reloadBtn.addEventListener("click", () => load({ force: true }));
     themeToggleEl.addEventListener("click", () => {
       const current = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
       applyTheme(current === "dark" ? "light" : "dark", true);
     });
-    chanEl.addEventListener("change", load);
+    chanEl.addEventListener("change", () => {
+      lastRenderKey = "";
+      load({ force: true });
+    });
     sendBtn.addEventListener("click", postMessage);
     postTextEl.addEventListener("keydown", (event) => {
       if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
